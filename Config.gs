@@ -17,6 +17,8 @@ var APP = {
   DEFAULT_PROJECT_ID: 'YEP-2027-001',
   SS_NAME: 'YearEnd_PMO_2027_Database',
   PROP_SS_ID: 'SPREADSHEET_ID',
+  // 你的資料庫試算表（僅在 Script Properties 尚未設定時，由 setupDatabase() 寫入一次；前端無法修改）
+  DEFAULT_SPREADSHEET_ID: '1VOrrbgMmHFSg_EXUL_nzFOH8t6bL2aGGraRrI6paek0',
   LOCK_WAIT_MS: 15000,
   MAX_STR: 300,
   MAX_TEXT: 5000

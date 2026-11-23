@@ -75,7 +75,7 @@ YearEnd-PMO/
 2. **新增檔案**：把每個 `.gs` 用「＋ → 指令碼」新增，名稱照抄（不用打副檔名）；把每個 `.html` 用「＋ → HTML」新增，名稱必須是 `Index`、`Styles`、`Scripts`。
 3. **appsscript.json**：到「專案設定」勾選「在編輯器中顯示 appsscript.json」，然後用本專案的內容整份取代。
 4. **初始化**：在編輯器上方選 `setupDatabase` 並執行，第一次執行會要求授權。
-   - 如果專案綁定在試算表上，就直接使用那份試算表；否則會自動建立 `YearEnd_PMO_2027_Database`。
+   - 已預設使用你的試算表 `1VOrrbgMmHFSg_EXUL_nzFOH8t6bL2aGGraRrI6paek0`（`Config.gs` 的 `DEFAULT_SPREADSHEET_ID`）。若清空此值：專案綁定在試算表上時使用該試算表；否則會自動建立 `YearEnd_PMO_2027_Database`。
    - Spreadsheet ID 存在「專案設定 → 指令碼屬性 → `SPREADSHEET_ID`」。前端沒有任何方法能修改它。
    - 要改用另一份試算表時，在編輯器執行 `setSpreadsheetId('新ID')`，再執行 `setupDatabase()`。
 5. **授權**：會請求這些權限：Sheets（讀寫）、userinfo.email（辨識使用者）、script.scriptapp（建立每週觸發器）。

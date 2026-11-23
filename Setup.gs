@@ -15,8 +15,9 @@
 
 function setupDatabase() {
   var props = PropertiesService.getScriptProperties();
-  var ss, id = props.getProperty(APP.PROP_SS_ID);
+  var ss, id = props.getProperty(APP.PROP_SS_ID) || APP.DEFAULT_SPREADSHEET_ID || '';
   if (id) {
+    props.setProperty(APP.PROP_SS_ID, id);
     ss = SpreadsheetApp.openById(id);
   } else {
     ss = SpreadsheetApp.getActiveSpreadsheet() || SpreadsheetApp.create(APP.SS_NAME);
