@@ -1,0 +1,877 @@
+<script>
+/* =========================================================================
+ * YearEnd PMO — Front-end (SPA)
+ * - 所有資料透過 google.script.run 呼叫後端；前端不存放任何密鑰。
+ * - 所有使用者輸入在輸出前以 esc() 轉義，避免 XSS。
+ * - 權限資訊僅用於隱藏按鈕；真正的授權一律由後端檢查。
+ * ========================================================================= */
+(function () {
+'use strict';
+
+/* ------------------------------ Utils ------------------------------ */
+const $ = (s, el) => (el || document).querySelector(s);
+const esc = v => String(v === null || v === undefined ? '' : v)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+const fmtMoney = n => (n === null || n === undefined || n === '' || !isFinite(n)) ? 'N/A' : 'NT$' + Math.round(Number(n)).toLocaleString('zh-TW');
+const fmtNum = (n, d) => (n === null || n === undefined || n === '' || !isFinite(n)) ? 'N/A' : Number(n).toLocaleString('zh-TW', { maximumFractionDigits: d === undefined ? 1 : d });
+const fmtPct = n => (n === null || n === undefined || n === '' || !isFinite(n)) ? 'N/A' : fmtNum(n, 1) + '%';
+const todayStr = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
+const md = s => s ? s.substring(5).replace('-', '/') : '';
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+
+const ICON = {
+  dashboard: 'M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z',
+  phone: 'M7 2h10a2 2 0 012 2v16a2 2 0 01-2 2H7a2 2 0 01-2-2V4a2 2 0 012-2zM11 18h2',
+  folder: 'M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z',
+  flag: 'M4 22V4M4 4h12l-2 4 2 4H4',
+  tree: 'M12 3v4M12 7H6v4M12 7h6v4M4 11h4v4H4zM16 11h4v4h-4zM10 17h4v4h-4zM6 15v2h6M18 15v2h-6',
+  gantt: 'M3 5h8M6 10h10M9 15h9M3 20h18',
+  users: 'M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM22 21v-2a4 4 0 00-3-3.9M16 3.1a4 4 0 010 7.8',
+  grid: 'M3 3h18v18H3zM3 9h18M3 15h18M9 3v18M15 3v18',
+  coin: 'M12 2a10 10 0 100 20 10 10 0 000-20zM15 8.5c-.5-1-1.6-1.5-3-1.5-1.9 0-3 .9-3 2.2 0 3 6 1.6 6 4.6 0 1.3-1.2 2.2-3 2.2-1.5 0-2.6-.6-3.1-1.6M12 5v2M12 17v2',
+  calc: 'M5 2h14v20H5zM8 6h8M8 11h2M14 11h2M8 15h2M14 15h2M8 19h2M14 19h2',
+  alert: 'M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z',
+  shield: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
+  swap: 'M7 16V4M7 4L3 8M7 4l4 4M17 8v12M17 20l4-4M17 20l-4-4',
+  chat: 'M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z',
+  rocket: 'M5 15c-1.5 1.3-2 5-2 5s3.7-.5 5-2M12 15l-3-3a22 22 0 012-4A13 13 0 0122 2c0 2.7-.8 7.5-6 11a22 22 0 01-4 2z',
+  link: 'M10 13a5 5 0 007.5.5l3-3a5 5 0 00-7-7l-1.7 1.7M14 11a5 5 0 00-7.5-.5l-3 3a5 5 0 007 7l1.7-1.7',
+  trend: 'M3 17l6-6 4 4 8-8M14 7h7v7',
+  box: 'M21 8l-9-5-9 5v8l9 5 9-5zM3 8l9 5 9-5M12 13v8',
+  check: 'M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11',
+  file: 'M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8zM14 2v6h6M8 13h8M8 17h6',
+  report: 'M9 17v-6M13 17V7M17 17v-3M3 3v18h18',
+  bulb: 'M9 18h6M10 22h4M12 2a7 7 0 00-4 12.7V17h8v-2.3A7 7 0 0012 2z',
+  gear: 'M12 15a3 3 0 100-6 3 3 0 000 6zM19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 01-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 010-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 014 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 010 4h-.1a1.7 1.7 0 00-1.5 1z',
+  key: 'M21 2l-2 2m-7.6 7.6a5.5 5.5 0 11-7.8 7.8 5.5 5.5 0 017.8-7.8zM15.5 7.5l3 3L22 7l-3-3',
+  log: 'M4 4h16v16H4zM8 8h8M8 12h8M8 16h5',
+  plus: 'M12 5v14M5 12h14', refresh: 'M23 4v6h-6M1 20v-6h6M3.5 9a9 9 0 0114.9-3.4L23 10M1 14l4.6 4.4A9 9 0 0020.5 15',
+  download: 'M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3', x: 'M18 6L6 18M6 6l12 12',
+  chev: 'M9 18l6-6-6-6', chevd: 'M6 9l6 6 6-6', cols: 'M12 3v18M3 3h18v18H3z', inbox: 'M22 12h-6l-2 3h-4l-2-3H2M5.5 5h13L22 12v6a2 2 0 01-2 2H4a2 2 0 01-2-2v-6z'
+};
+const svg = (name, size) => `<svg width="${size || 18}" height="${size || 18}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${ICON[name] || ICON.box}"/></svg>`;
+
+/* ------------------------------ API ------------------------------ */
+function api(method, ...args) {
+  return new Promise((resolve, reject) => {
+    if (typeof google === 'undefined' || !google.script || !google.script.run) {
+      reject({ code: 'NO_BACKEND', message: '此頁面需由 Google Apps Script Web App 開啟才能連接資料。' });
+      return;
+    }
+    google.script.run
+      .withSuccessHandler(res => {
+        if (!res) return reject({ code: 'EMPTY', message: '伺服器沒有回應資料' });
+        if (res.ok) resolve(res.data); else reject(res.error || { code: 'UNKNOWN', message: '未知錯誤' });
+      })
+      .withFailureHandler(err => reject({ code: 'NETWORK', message: (err && err.message) || '網路或伺服器錯誤' }))[method](...args);
+  });
+}
+
+/* ------------------------------ State ------------------------------ */
+const S = {
+  boot: null, projectId: null, page: 'dashboard', dash: null, charts: [],
+  filters: { statusDate: '', from: '', to: '' }, cache: {}, pendingFilter: null,
+  table: {}, theme: 'light'
+};
+
+const NAV = [
+  { section: 'OVERVIEW', items: [
+    { key: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
+    { key: 'mobile', label: 'Mobile Dashboard', icon: 'phone' },
+    { key: 'overview', label: 'Project Overview', icon: 'folder', table: 'Projects' },
+    { key: 'milestones', label: 'Milestones', icon: 'flag', table: 'Milestones', badge: 'Milestones' }]},
+  { section: 'PROJECT PLANNING', items: [
+    { key: 'wbs', label: 'WBS', icon: 'tree', table: 'WBS', badge: 'WBS', badgeCls: 'danger' },
+    { key: 'gantt', label: 'Schedule / Gantt', icon: 'gantt', table: 'WBS', phase: 2 },
+    { key: 'resources', label: 'Human Resources', icon: 'users', table: 'Resources' },
+    { key: 'raci', label: 'RACI Matrix', icon: 'grid', table: 'RACI', phase: 3 },
+    { key: 'costs', label: 'Cost Management', icon: 'coin', table: 'Costs' },
+    { key: 'estimates', label: 'Function Point / Complexity', icon: 'calc', table: 'Estimates' }]},
+  { section: 'PROJECT EXECUTION', items: [
+    { key: 'issues', label: 'Issue Tracking', icon: 'alert', table: 'Issues', badge: 'Issues' },
+    { key: 'risks', label: 'Risk Management', icon: 'shield', table: 'Risks', badge: 'Risks', badgeCls: 'warn' },
+    { key: 'changes', label: 'Change Management', icon: 'swap', table: 'Changes', badge: 'Changes' },
+    { key: 'comms', label: 'Communication & Meetings', icon: 'chat', table: 'Communications' },
+    { key: 'execution', label: 'Deployment / Event Execution', icon: 'rocket', table: 'Execution', phase: 3 }]},
+  { section: 'PROJECT CONTROL', items: [
+    { key: 'requirements', label: 'Requirements Traceability', icon: 'link', table: 'Requirements' },
+    { key: 'weekly', label: 'Weekly Performance', icon: 'trend', table: 'WeeklySnapshots' },
+    { key: 'deliverables', label: 'Deliverables', icon: 'box', table: 'WBS', preset: { level: 3 } },
+    { key: 'acceptance', label: 'Acceptance Checklist', icon: 'check', table: 'Acceptance', badge: 'Acceptance' },
+    { key: 'documents', label: 'Documents', icon: 'file', table: 'Documents' }]},
+  { section: 'PROJECT CLOSING', items: [
+    { key: 'closure', label: 'Closure Report', icon: 'report', table: 'Documents', preset: { document_category: 'Project Closure Report' } },
+    { key: 'lessons', label: 'Lessons Learned', icon: 'bulb', table: 'Documents', preset: { document_category: 'Lessons Learned' } }]},
+  { section: 'SYSTEM', items: [
+    { key: 'settings', label: 'Settings', icon: 'gear', table: 'Settings' },
+    { key: 'users', label: 'User Roles', icon: 'key', table: 'Users' },
+    { key: 'audit', label: 'Audit Logs', icon: 'log', table: 'AuditLogs' }]}
+];
+const NAV_FLAT = NAV.flatMap(s => s.items);
+
+const DEFAULT_COLS = {
+  Projects: ['project_id', 'project_name', 'project_status', 'start_date', 'planned_end_date', 'event_date', 'total_budget', 'baseline_version'],
+  WBS: ['wbs_code', 'task_name', 'deliverable', 'owner_id', 'planned_start_date', 'planned_end_date', 'percent_complete', 'task_weight', 'status', 'actual_end_date'],
+  Milestones: ['milestone_id', 'milestone_name', 'baseline_date', 'forecast_date', 'actual_date', 'owner_id', 'status'],
+  Resources: ['resource_id', 'name', 'department', 'role', 'capacity_hours_per_week', 'allocated_hours', 'hourly_rate', 'availability_status'],
+  RACI: ['deliverable_id', 'resource_id', 'responsibility_type'],
+  Costs: ['category', 'description', 'wbs_id', 'baseline_budget', 'committed_amount', 'actual_amount', 'forecast_amount', 'payment_status', 'due_date'],
+  Issues: ['issue_id', 'title', 'severity', 'priority', 'owner_id', 'status', 'created_date', 'due_date'],
+  Risks: ['risk_id', 'risk_description', 'category', 'probability', 'impact', 'risk_score', 'severity', 'owner_id', 'status'],
+  Changes: ['change_title', 'requester_id', 'request_date', 'cost_impact', 'schedule_impact', 'implementation_status', 'decision'],
+  Communications: ['meeting_title', 'meeting_date', 'start_time', 'end_time', 'organizer_id', 'meeting_status'],
+  Execution: ['event_stage', 'planned_start', 'planned_end', 'owner_id', 'completion_percent', 'result'],
+  Requirements: ['requirement_id', 'requirement_description', 'priority', 'status', 'linked_wbs_ids', 'linked_test_ids'],
+  WeeklySnapshots: ['week_ending', 'planned_percent', 'actual_percent', 'completed_task_count', 'overdue_task_count', 'open_issue_count', 'high_risk_count', 'cpi', 'spi'],
+  Acceptance: ['acceptance_item', 'deliverable_id', 'reviewer_id', 'planned_review_date', 'result', 'is_critical', 'evidence_link'],
+  Documents: ['document_category', 'document_name', 'document_version', 'owner_id', 'status', 'planned_delivery_date', 'document_url'],
+  Estimates: ['component_name', 'estimation_method', 'complexity_level', 'quantity', 'unit_effort_hours', 'estimated_hours', 'estimated_cost'],
+  Settings: ['setting_key', 'setting_value', 'description'],
+  Users: ['email', 'display_name', 'role', 'resource_id', 'active'],
+  AuditLogs: ['timestamp', 'actor_id', 'action_type', 'entity_type', 'entity_id', 'result']
+};
+const RES_FIELDS = ['owner_id', 'sponsor_id', 'pm_id', 'reporter_id', 'organizer_id', 'reviewer_id', 'requester_id', 'approver_id', 'estimator_id', 'resource_id', 'stakeholder_id', 'approved_by'];
+const DERIVED = { Risks: ['risk_score', 'severity'], WBS: ['level', 'duration_days', 'approved_at'], Changes: ['history_json', 'decision', 'approver_id', 'approval_date'], _all: ['created_at', 'updated_at'] };
+const STATUS_TONE = {
+  ok: ['Completed', 'Achieved', 'Passed', 'Closed', 'Resolved', 'Approved', 'Implemented', 'Verified', 'Done', 'Go', 'Green', 'OK', 'Available', 'Low'],
+  warn: ['At Risk', 'Warning', 'Yellow', 'High', 'Medium', 'Impact Analysis', 'Submitted', 'In Review', 'Monitoring', 'Partially Available', 'Waived', 'Achieved Late'],
+  bad: ['Delayed', 'Blocked', 'Failed', 'Critical', 'Red', 'Rejected', 'No-Go', 'Occurred', 'Issue', 'Unavailable'],
+  info: ['In Progress', 'Open', 'On Track', 'Scheduled', 'Drafting', 'Executing', 'Planning']
+};
+const tone = v => Object.keys(STATUS_TONE).find(k => STATUS_TONE[k].includes(v)) || '';
+const pill = v => v === '' || v === null || v === undefined ? '<span class="pill">—</span>' : `<span class="pill ${tone(v)}">${esc(v)}</span>`;
+const resName = id => { const r = (S.boot && S.boot.resources || []).find(x => x.id === id); return r ? r.name : (id || ''); };
+
+/* ------------------------------ UI primitives ------------------------------ */
+function toast(msg, kind) {
+  const el = document.createElement('div');
+  el.className = 'toast ' + (kind || '');
+  el.innerHTML = esc(msg);
+  $('#toasts').appendChild(el);
+  setTimeout(() => el.remove(), kind === 'err' ? 7000 : 3500);
+}
+function errMsg(e) {
+  if (!e) return '未知錯誤';
+  if (e.code === 'CONFLICT') return '儲存衝突：' + e.message;
+  return e.message || String(e);
+}
+function emptyState(text, icon) { return `<div class="empty">${svg(icon || 'inbox', 32)}<div>${esc(text)}</div></div>`; }
+function errorState(e, retry) {
+  return `<div class="card"><div class="notice bad"><b>無法載入資料</b>（${esc(e.code || 'ERROR')}）：${esc(e.message || e)}</div>
+    ${retry ? '<button class="btn" data-act="retry">' + svg('refresh', 16) + '重試</button>' : ''}</div>`;
+}
+function skeleton() {
+  return `<div class="kpis">${Array(10).fill('<div class="card kpi"><div class="skeleton" style="height:70px"></div></div>').join('')}</div>
+    <div class="grid"><div class="card col-8"><div class="skeleton" style="height:300px"></div></div><div class="card col-4"><div class="skeleton" style="height:300px"></div></div></div>`;
+}
+function openModal(html, opts) {
+  const root = $('#modalRoot');
+  const prev = document.activeElement;
+  root.innerHTML = `<div class="overlay" role="presentation"><div class="modal ${opts && opts.size || ''}" role="dialog" aria-modal="true" aria-labelledby="mTitle">${html}</div></div>`;
+  const overlay = root.firstElementChild;
+  const close = () => { root.innerHTML = ''; document.removeEventListener('keydown', onKey); if (prev && prev.focus) prev.focus(); };
+  const onKey = e => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  overlay.addEventListener('mousedown', e => { if (e.target === overlay) close(); });
+  overlay.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', close));
+  const first = overlay.querySelector('input:not([readonly]),select,textarea,button.primary');
+  if (first) setTimeout(() => first.focus(), 30);
+  return { el: overlay, close };
+}
+function confirmDialog(title, text, okLabel) {
+  return new Promise(resolve => {
+    const m = openModal(`<div class="modal-h"><h2 id="mTitle">${esc(title)}</h2></div>
+      <div class="modal-b" style="display:block"><p style="margin:0">${esc(text)}</p></div>
+      <div class="modal-f"><button class="btn" data-close>取消</button><button class="btn primary" id="cOk">${esc(okLabel || '確定')}</button></div>`, { size: 'sm' });
+    m.el.querySelector('#cOk').addEventListener('click', () => { m.close(); resolve(true); });
+    m.el.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => resolve(false)));
+  });
+}
+
+/* ------------------------------ Sidebar & routing ------------------------------ */
+function renderNav() {
+  const badges = (S.dash && S.dash.badges) || {};
+  const perms = S.boot ? S.boot.permissions : {};
+  $('#nav').innerHTML = NAV.map(sec => {
+    const items = sec.items.filter(it => !it.table || !perms[it.table] || perms[it.table].read);
+    if (!items.length) return '';
+    return `<div class="nav-section">${esc(sec.section)}</div>` + items.map(it => {
+      const b = it.badge && badges[it.badge] ? `<span class="badge ${it.badgeCls || ''}" aria-label="${badges[it.badge]} 項待處理">${badges[it.badge]}</span>` : '';
+      return `<button class="nav-item" data-page="${it.key}" ${S.page === it.key ? 'aria-current="page"' : ''} title="${esc(it.label)}">${svg(it.icon)}<span class="label">${esc(it.label)}</span>${b}</button>`;
+    }).join('');
+  }).join('');
+}
+function go(page, filter) {
+  S.page = page;
+  S.pendingFilter = filter || null;
+  S.charts.forEach(c => c.destroy()); S.charts = [];
+  const item = NAV_FLAT.find(i => i.key === page) || NAV_FLAT[0];
+  $('#pageTitle').textContent = item.label;
+  renderNav();
+  closeDrawer();
+  if (page === 'dashboard' || page === 'mobile') loadDashboard();
+  else renderTablePage(item);
+  $('#view').focus({ preventScroll: true });
+  window.scrollTo(0, 0);
+}
+function closeDrawer() { $('#sidebar').classList.remove('open'); $('#backdrop').classList.remove('show'); $('#menuToggle').setAttribute('aria-expanded', 'false'); }
+
+/* ------------------------------ Dashboard ------------------------------ */
+async function loadDashboard(force) {
+  const view = $('#view');
+  if (!S.dash || force) view.innerHTML = skeleton();
+  try {
+    S.dash = await api('getDashboardData', S.projectId, S.filters);
+    renderNav();
+    S.page === 'mobile' ? renderMobile(S.dash) : renderDashboard(S.dash);
+  } catch (e) {
+    view.innerHTML = errorState(e, true);
+    view.querySelector('[data-act="retry"]').addEventListener('click', () => loadDashboard(true));
+  }
+}
+
+function kpiCard(label, value, foot, icon, nav, tone2) {
+  const tag = nav ? 'button' : 'div';
+  return `<${tag} class="card kpi ${nav ? 'clickable' : ''}" ${nav ? `data-go="${nav}"` : ''}>
+    <div class="k-label"><span>${esc(label)}</span><span class="k-icon">${svg(icon, 16)}</span></div>
+    <div class="k-value" ${tone2 ? `style="color:var(--${tone2}-ink)"` : ''}>${value}</div><div class="k-foot">${foot}</div></${tag}>`;
+}
+
+function dashFilters(d) {
+  const projects = S.boot.projects;
+  return `<div class="filters" role="group" aria-label="Dashboard 篩選">
+    <div class="field"><label for="fProject">專案</label><select id="fProject" class="input">${projects.map(p => `<option value="${esc(p.id)}" ${p.id === S.projectId ? 'selected' : ''}>${esc(p.id + '｜' + p.name)}</option>`).join('')}</select></div>
+    <div class="field"><label for="fStatus">狀態日</label><input id="fStatus" type="date" class="input" value="${esc(S.filters.statusDate || d.statusDate)}"></div>
+    <div class="field"><label for="fFrom">圖表起日</label><input id="fFrom" type="date" class="input" value="${esc(S.filters.from)}"></div>
+    <div class="field"><label for="fTo">圖表迄日</label><input id="fTo" type="date" class="input" value="${esc(S.filters.to)}"></div>
+    <button class="btn" id="fApply">套用</button>
+    <button class="btn" id="fRefresh">${svg('refresh', 16)}重新整理</button>
+    <span class="sub" style="color:var(--muted);font-size:12px;align-self:center">最後更新：${esc(d.generatedAt)}（Asia/Taipei）</span>
+  </div>`;
+}
+
+function renderDashboard(d) {
+  const k = d.kpis, p = d.project, sc = d.sCurve;
+  const hello = (new Date().getHours() < 12 ? '早安' : new Date().getHours() < 18 ? '午安' : '晚安') + '，' + (S.boot.user.name || '');
+  const canW = t => S.boot.permissions[t] && S.boot.permissions[t].write;
+  $('#view').innerHTML = `
+  <div class="greeting">
+    <div><h2>${esc(hello)}</h2><div class="meta">${esc(p.project_name)}｜${esc(p.theme || '')}｜活動日 ${esc(p.event_date)}｜${pill(p.project_status)} <span class="pill">基準 ${esc(p.baseline_version || '未建立')}</span></div></div>
+    <div class="actions">
+      <button class="btn" id="exportBtn">${svg('download', 16)}匯出 KPI</button>
+      ${S.boot.permissions._snapshot ? `<button class="btn" id="snapBtn">${svg('trend', 16)}產生本週快照</button>` : ''}
+      <div class="qa" style="display:flex;gap:6px;flex-wrap:wrap">
+        ${[['WBS', 'Task'], ['Issues', 'Issue'], ['Risks', 'Risk'], ['Communications', 'Meeting'], ['Changes', 'Change Request']].filter(x => canW(x[0]))
+          .map(x => `<button class="btn ${x[0] === 'Issues' ? 'primary' : ''}" data-new="${x[0]}">${svg('plus', 16)}${x[1]}</button>`).join('')}
+      </div>
+    </div>
+  </div>
+  ${dashFilters(d)}
+  ${d.weightMode === 'equal' ? '<div class="notice warn">工作包未設定權重，完成率採「等權重」計算。</div>' : ''}
+  <div class="kpis">
+    ${kpiCard('整體完成率', fmtPct(k.completionPct), '加權（含進行中進度）', 'trend', 'wbs')}
+    ${kpiCard('WBS 工作包', fmtNum(k.totalWorkPackages, 0) + '<small>項</small>', '最底層工作包', 'tree', 'wbs')}
+    ${kpiCard('已完成工作包', fmtNum(k.completedWorkPackages, 0) + '<small>項</small>', '有實際完成日', 'check', 'wbs')}
+    ${kpiCard('逾期工作', fmtNum(k.overdueTasks, 0) + '<small>項</small>', '超過計畫完成日', 'alert', 'overdue', k.overdueTasks ? 'danger' : '')}
+    ${kpiCard('計畫預算', fmtMoney(k.plannedBudget), '專案核定總額', 'coin', 'costs')}
+    ${kpiCard('實際成本', fmtMoney(k.actualCost), '已承諾 ' + fmtMoney(k.committedCost), 'coin', 'costs')}
+    ${kpiCard('預算使用率', fmtPct(k.budgetUtilizationPct), '實際成本 ÷ 計畫預算', 'report', 'costs')}
+    ${kpiCard('未結問題', fmtNum(k.openIssues, 0) + '<small>件</small>', 'Open / In Progress / Blocked', 'alert', 'issues', k.openIssues ? 'warning' : '')}
+    ${kpiCard('高風險', fmtNum(k.highRisks, 0) + '<small>項</small>', '風險分數 ≥ 門檻', 'shield', 'risks', k.highRisks ? 'warning' : '')}
+    ${kpiCard('近期里程碑', fmtNum(k.upcomingMilestones, 0) + '<small>個</small>', '未來 14 天內', 'flag', 'milestones')}
+  </div>
+
+  <div class="grid">
+    <section class="card col-8" aria-labelledby="hS">
+      <div class="card-h"><h2 id="hS">專案進度 S-Curve</h2><span class="sub">${sc.baselineApproved ? '基準 ' + esc(sc.baselineVersion) : '計畫版本（基準尚未核准）'}</span><span class="spacer"></span>
+        ${sc.varianceLevel !== 'OK' ? `<span class="pill ${sc.varianceLevel === 'Critical' ? 'bad' : 'warn'}">${sc.varianceLevel === 'Critical' ? 'Critical' : 'Warning'}：進度落後</span>` : ''}
+        ${d.overdueList.length ? `<button class="btn sm" data-go="overdue">查看逾期 ${d.overdueList.length} 項</button>` : ''}</div>
+      <div class="stat-row">
+        <div>狀態日計畫<b>${fmtPct(sc.plannedAtStatus)}</b></div>
+        <div>已交付實際<b>${sc.hasActual ? fmtPct(sc.actualAtStatus) : '—'}</b></div>
+        <div>進度差異<b style="color:${sc.variance < 0 ? 'var(--danger-ink)' : 'inherit'}">${sc.variance > 0 ? '+' : ''}${fmtNum(sc.variance)} pt</b></div>
+        <div>計畫完工<b>${esc(sc.plannedFinish)}</b></div>
+        <div>預測完工<b>${esc(sc.forecastFinish)}</b></div>
+      </div>
+      ${!sc.baselineApproved ? '<div class="notice">WBS 基準尚未核准，Baseline 曲線為「計畫版本」；核准後才可作為正式績效基準。</div>' : ''}
+      ${!sc.hasActual ? '<div class="notice">尚無實際交付資料（沒有任何工作包填寫實際完成日），因此不顯示 Actual 曲線。</div>' : ''}
+      <div class="chart-box"><canvas id="cS" role="img" aria-label="S 曲線：計畫、實際與預測累積完成率"></canvas></div>
+      <div class="legend">
+        <span><i style="background:var(--chart-baseline)"></i>Baseline 計畫</span>
+        <span><i style="background:var(--s1)"></i>Actual 實際（依實際完成日）</span>
+        <span style="color:var(--s2)"><i class="dash" style="color:var(--s2)"></i><span style="color:var(--text-2)">Forecast 預測</span></span>
+        <span><i style="background:var(--navy);width:2px;height:12px"></i>狀態日 ${esc(d.statusDate)}</span>
+      </div>
+      <details style="margin-top:8px;font-size:12px;color:var(--muted)"><summary>預測算法與假設</summary>${esc(sc.forecastMethod)}</details>
+    </section>
+
+    <section class="card col-4" aria-labelledby="hH">
+      <div class="card-h"><h2 id="hH">Project Health</h2></div>
+      <div class="health"><div class="health-ring ${d.health.overall}">${esc(d.health.overall)}</div>
+        <div><b>${{ Green: '狀態良好', Yellow: '需要關注', Red: '需要立即處理' }[d.health.overall]}</b><div class="sub" style="color:var(--muted);font-size:12px">綜合進度、成本、風險、品質與里程碑；門檻可於 Settings 設定</div></div></div>
+      <div style="margin-top:10px">${d.health.dimensions.map(x => `<div class="dim"><b>${esc(x.name)}</b>${pill(x.level)}<span style="color:var(--text-2)">${esc(x.reason)}</span></div>`).join('')}</div>
+    </section>
+
+    <section class="card col-4" aria-labelledby="hR">
+      <div class="card-h"><h2 id="hR">Reminder</h2><span class="sub">7 天內到期與待核准</span></div>
+      ${d.reminders.length ? `<div class="list">${d.reminders.map(r => `<button class="li li-btn" data-open="${esc(r.ref.table)}|${esc(r.ref.id)}">
+        <div class="date-badge"><b>${esc(r.date.substring(8))}</b><span>${esc(r.date.substring(5, 7))}月</span></div>
+        <div class="grow"><div class="t">${esc(r.title)}</div><div class="s">${esc(r.kind)}｜${esc(r.owner)}</div></div></button>`).join('')}</div>` : emptyState('目前沒有即將到期或待核准的事項', 'check')}
+    </section>
+
+    <section class="card col-4" aria-labelledby="hC">
+      <div class="card-h"><h2 id="hC">Calendar</h2><span class="sub">本週與下週</span></div>
+      ${d.calendar.length ? `<div class="list">${d.calendar.slice(0, 8).map(c => `<div class="li">
+        <div class="date-badge"><b>${esc(c.date.substring(8))}</b><span>${esc(c.date.substring(5, 7))}月</span></div>
+        <div class="grow"><div class="t">${esc(c.title)}</div><div class="s">${c.type === 'meeting' ? '會議 ' + esc(c.time) : c.type === 'milestone' ? '里程碑' : '工作期限'}</div></div></div>`).join('')}</div>` : emptyState('本週與下週沒有會議或期限', 'inbox')}
+    </section>
+
+    <section class="card col-4" aria-labelledby="hM">
+      <div class="card-h"><h2 id="hM">Milestones</h2><span class="spacer"></span><button class="btn sm" data-go="milestones">全部</button></div>
+      <div class="list">${d.milestones.map(m => `<div class="li"><div class="grow"><div class="t">${esc(m.milestone_id)}｜${esc(m.milestone_name)}</div>
+        <div class="s">基準 ${esc(m.baseline_date)}${m.actual_date ? '｜實際 ' + esc(m.actual_date) : m.days_to_go !== null ? '｜剩 ' + m.days_to_go + ' 天' : ''}${m.delay_days ? '｜延誤 ' + m.delay_days + ' 天' : ''}</div></div>${pill(m.health)}</div>`).join('') || emptyState('尚無里程碑')}</div>
+    </section>
+
+    <section class="card col-8" aria-labelledby="hT">
+      <div class="card-h"><h2 id="hT">Project Timeline</h2><span class="sub">未來 21 天到期的交付成果</span></div>
+      ${timelineHtml(d)}
+    </section>
+
+    <section class="card col-4" aria-labelledby="hMy">
+      <div class="card-h"><h2 id="hMy">My Tasks</h2><span class="sub">${esc(resName(S.boot.user.resourceId) || '未綁定人員')}</span></div>
+      ${!S.boot.user.resourceId ? emptyState('您的帳號尚未綁定 Resources 人員（Users.resource_id）') :
+        d.myTasks.length ? `<div class="list">${d.myTasks.map(t => `<button class="li li-btn" data-open="WBS|${esc(t.id)}"><div class="grow"><div class="t">${esc(t.code)} ${esc(t.name)}</div>
+        <div class="s">到期 ${esc(t.end)}｜${fmtPct(t.pct)}</div><div class="progress" style="margin-top:4px"><i style="width:${Number(t.pct) || 0}%"></i></div></div>${pill(t.status)}</button>`).join('')}</div>` : emptyState('目前沒有指派給您的未完成工作', 'check')}
+    </section>
+
+    <section class="card col-6" aria-labelledby="hW">
+      <div class="card-h"><h2 id="hW">WBS 工作項目趨勢</h2><span class="sub">來源：每週快照</span></div>
+      ${d.wbsTrend.length ? `<div class="chart-box sm"><canvas id="cW" role="img" aria-label="WBS 狀態每週趨勢"></canvas></div>
+        <div class="legend">${['已完成', '進行中', '未開始', '延遲', '受阻'].map((l, i) => `<span><i style="background:var(--s${i + 1})"></i>${l}</span>`).join('')}</div>`
+        : emptyState('尚無每週快照。趨勢圖只使用 WeeklySnapshots 的歷史資料，不以目前資料回填。', 'trend')}
+      <div class="stat-row" style="margin-top:10px">${Object.keys(d.wbsStatusCounts).map(s => `<div>${esc(s)}<b>${d.wbsStatusCounts[s]}</b></div>`).join('')}</div>
+    </section>
+
+    <section class="card col-6" aria-labelledby="hCo">
+      <div class="card-h"><h2 id="hCo">Cost Dashboard</h2><span class="spacer"></span><button class="btn sm" data-go="costs">成本明細</button></div>
+      <div class="stat-row">
+        <div>計畫預算<b>${fmtMoney(d.cost.plannedBudget)}</b></div><div>已承諾<b>${fmtMoney(d.cost.committed)}</b></div>
+        <div>實際支出<b>${fmtMoney(d.cost.actual)}</b></div><div>完工預估<b>${fmtMoney(d.cost.forecastAtCompletion)}</b></div>
+        <div>預算差異<b style="color:${d.cost.budgetVariance < 0 ? 'var(--danger-ink)' : 'inherit'}">${fmtMoney(d.cost.budgetVariance)}</b></div>
+      </div>
+      ${d.cost.consistent ? '' : '<div class="notice bad">分類加總與成本基準總額不一致，請檢查 Costs 資料。</div>'}
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:12px;align-items:center">
+        <div class="chart-box sm"><canvas id="cDonut" role="img" aria-label="成本基準分類"></canvas></div>
+        <div class="legend" style="flex-direction:column;gap:6px;margin:0">${d.cost.breakdown.map((b, i) => `<span style="justify-content:space-between;width:100%"><span><i class="sq" style="background:var(--s${(i % 8) + 1})"></i>${esc(b.category)}</span><b>${fmtMoney(b.baseline)}</b></span>`).join('')}</div>
+      </div>
+    </section>
+
+    <section class="card col-8" aria-labelledby="hCb">
+      <div class="card-h"><h2 id="hCb">分類預算 vs 承諾 vs 實際</h2></div>
+      <div class="chart-box sm"><canvas id="cBar" role="img" aria-label="各成本分類預算、承諾與實際"></canvas></div>
+      <div class="legend"><span><i class="sq" style="background:var(--chart-baseline)"></i>基準預算</span><span><i class="sq" style="background:var(--s2)"></i>已承諾</span><span><i class="sq" style="background:var(--s1)"></i>實際支出</span></div>
+      <div class="card-h" style="margin-top:14px"><h3>成本趨勢（PV / EV / AC）</h3><span class="sub">來源：每週快照</span></div>
+      ${d.cost.trend.length ? '<div class="chart-box sm"><canvas id="cCT" role="img" aria-label="每週 PV EV AC"></canvas></div><div class="legend"><span><i style="background:var(--chart-baseline)"></i>PV</span><span><i style="background:var(--s1)"></i>EV</span><span><i style="background:var(--s2)"></i>AC</span></div>' : emptyState('尚無每週快照，無法顯示成本趨勢', 'trend')}
+    </section>
+
+    <section class="card col-4" aria-labelledby="hE">
+      <div class="card-h"><h2 id="hE">實獲值 EVM</h2></div>
+      ${d.evm.note ? `<div class="notice warn">${esc(d.evm.note)}</div>` : ''}
+      <table class="evm"><tbody>
+        ${[['BAC（PMB）', fmtMoney(d.evm.BAC)], ['PV 計畫值', fmtMoney(d.evm.PV)], ['EV 實獲值', fmtMoney(d.evm.EV)], ['AC 實際成本', fmtMoney(d.evm.AC)],
+          ['CPI', d.evm.CPI === null ? 'N/A' : fmtNum(d.evm.CPI, 2)], ['SPI', d.evm.SPI === null ? 'N/A' : fmtNum(d.evm.SPI, 2)],
+          ['CV', d.evm.CV === null ? 'N/A' : fmtMoney(d.evm.CV)], ['SV', d.evm.SV === null ? 'N/A' : fmtMoney(d.evm.SV)],
+          ['EAC', fmtMoney(d.evm.EAC)], ['ETC', fmtMoney(d.evm.ETC)], ['VAC', fmtMoney(d.evm.VAC)]]
+          .map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('')}
+      </tbody></table>
+      <div style="font-size:12px;color:var(--muted);margin-top:8px">${esc(d.evm.eacMethod)}。應變準備金不分配至工作包，不計入 PMB。</div>
+    </section>
+
+    <section class="card col-4" aria-labelledby="hI">
+      <div class="card-h"><h2 id="hI">Issue Status</h2><span class="spacer"></span><button class="btn sm" data-go="issues">問題清單</button></div>
+      <div class="stat-row"><div>未結<b>${d.issues.open}</b></div><div>已結<b>${d.issues.closed}</b></div><div>逾期<b style="color:${d.issues.overdue ? 'var(--danger-ink)' : 'inherit'}">${d.issues.overdue}</b></div></div>
+      <div class="chart-box sm"><canvas id="cIs" role="img" aria-label="問題狀態分布"></canvas></div>
+    </section>
+
+    <section class="card col-4" aria-labelledby="hIa">
+      <div class="card-h"><h2 id="hIa">Issue Aging ／ Severity</h2></div>
+      <div class="chart-box sm"><canvas id="cAge" role="img" aria-label="未結問題天數分布"></canvas></div>
+      <div class="stat-row" style="margin-top:8px">${Object.keys(d.issues.bySeverity).map(s => `<div>${pill(s)}<b>${d.issues.bySeverity[s]}</b></div>`).join('')}</div>
+    </section>
+
+    <section class="card col-4" aria-labelledby="hRk">
+      <div class="card-h"><h2 id="hRk">Risk Matrix</h2><span class="sub">機率 × 影響（未關閉風險）</span></div>
+      ${riskMatrixHtml(d)}
+    </section>
+
+    <section class="card col-12" aria-labelledby="hAct">
+      <div class="card-h"><h2 id="hAct">Recent Activities</h2></div>
+      ${d.recentActivities.length ? `<div class="list">${d.recentActivities.map(a => `<div class="li"><div class="grow"><div class="t">${esc(a.actor)} ${esc(a.action)} ${esc(a.entity)} <span style="color:var(--muted)">${esc(a.id)}</span></div><div class="s">${esc(a.at)}</div></div></div>`).join('')}</div>`
+        : emptyState(S.boot.permissions.AuditLogs && S.boot.permissions.AuditLogs.read ? '尚無異動紀錄' : '您的角色無權檢視稽核紀錄')}
+    </section>
+  </div>`;
+  bindDashboard(d);
+  drawDashboardCharts(d);
+}
+
+function timelineHtml(d) {
+  if (!d.timeline.length) return emptyState('未來 21 天沒有到期的交付成果', 'gantt');
+  const start = d.statusDate, span = 21;
+  const pos = s => { const n = (Date.parse(s) - Date.parse(start)) / 86400000; return Math.max(0, Math.min(100, n / span * 100)); };
+  return `<div class="tl">${d.timeline.map(t => {
+    const l = pos(t.start), r = pos(t.end) + (100 / span);
+    return `<div class="tl-row"><button class="li-btn" data-open="WBS|${esc(t.id)}" style="display:block"><b>${esc(t.code)}</b> ${esc(t.name)}<div style="color:var(--muted)">${esc(t.owner)}</div></button>
+      <div class="tl-track" title="${esc(t.start)} → ${esc(t.end)}"><div class="tl-bar ${esc(t.status)}" style="left:${l}%;width:${Math.max(4, r - l)}%">${esc(md(t.start))}–${esc(md(t.end))}｜${esc(t.status)}</div></div></div>`;
+  }).join('')}</div><div class="legend"><span>狀態日 ${esc(start)} 起 21 天</span></div>`;
+}
+
+function riskMatrixHtml(d) {
+  const cls = s => s >= 20 ? 'c' : s >= 15 ? 'h' : s >= 8 ? 'm' : 'l';
+  let h = '<div class="heatmap" role="grid" aria-label="風險熱力圖">';
+  d.risks.matrix.forEach(row => {
+    h += `<div class="ax">P${row[0].p}</div>`;
+    row.forEach(c => { h += `<button class="cell ${cls(c.score)} ${c.count ? '' : 'zero'}" data-risk="${c.p}|${c.i}" aria-label="機率 ${c.p}、影響 ${c.i}，分數 ${c.score}，${c.count} 項風險">${c.count || '·'}</button>`; });
+  });
+  h += '<div></div>' + [1, 2, 3, 4, 5].map(i => `<div class="ax">I${i}</div>`).join('') + '</div>';
+  h += `<div class="legend"><span><i class="sq" style="background:#DCFCE7"></i>Low &lt;8</span><span><i class="sq" style="background:#FEF3C7"></i>Medium 8–14</span><span><i class="sq" style="background:#FED7AA"></i>High 15–19</span><span><i class="sq" style="background:#FECACA"></i>Critical ≥20</span></div>`;
+  if (d.risks.top.length) h += `<div class="list" style="margin-top:8px">${d.risks.top.slice(0, 3).map(r => `<button class="li li-btn" data-open="Risks|${esc(r.id)}"><div class="grow"><div class="t">${esc(r.desc)}</div><div class="s">${esc(r.owner)}</div></div><span class="pill ${tone(r.severity)}">${r.score}</span></button>`).join('')}</div>`;
+  return h;
+}
+
+function bindDashboard(d) {
+  const v = $('#view');
+  v.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => {
+    const t = b.dataset.go;
+    if (t === 'overdue') go('wbs', { ids: d.overdueList.map(x => x.id), label: '逾期工作包' });
+    else go(t);
+  }));
+  v.querySelectorAll('[data-open]').forEach(b => b.addEventListener('click', () => { const [t, id] = b.dataset.open.split('|'); openRecord(t, id); }));
+  v.querySelectorAll('[data-new]').forEach(b => b.addEventListener('click', () => openForm(b.dataset.new, null, () => loadDashboard())));
+  v.querySelectorAll('[data-risk]').forEach(b => b.addEventListener('click', () => {
+    const [p, i] = b.dataset.risk.split('|').map(Number);
+    go('risks', { fn: r => Number(r.probability) === p && Number(r.impact) === i && r.status !== 'Closed', label: `機率 ${p} × 影響 ${i}` });
+  }));
+  const fp = $('#fProject');
+  if (fp) fp.addEventListener('change', () => { S.projectId = fp.value; loadDashboard(true); });
+  const apply = () => { S.filters = { statusDate: $('#fStatus').value, from: $('#fFrom').value, to: $('#fTo').value }; loadDashboard(true); };
+  $('#fApply') && $('#fApply').addEventListener('click', apply);
+  $('#fRefresh') && $('#fRefresh').addEventListener('click', () => loadDashboard(true));
+  $('#exportBtn') && $('#exportBtn').addEventListener('click', () => {
+    const k = d.kpis;
+    downloadCsv('kpi_' + d.statusDate + '.csv', [['指標', '數值'], ['狀態日', d.statusDate], ['整體完成率%', k.completionPct], ['WBS 工作包', k.totalWorkPackages],
+      ['已完成', k.completedWorkPackages], ['逾期', k.overdueTasks], ['計畫預算', k.plannedBudget], ['實際成本', k.actualCost], ['預算使用率%', k.budgetUtilizationPct],
+      ['未結問題', k.openIssues], ['高風險', k.highRisks], ['近期里程碑', k.upcomingMilestones], ['計畫%（狀態日）', d.sCurve.plannedAtStatus],
+      ['實際%（狀態日）', d.sCurve.actualAtStatus], ['CPI', d.evm.CPI === null ? 'N/A' : d.evm.CPI], ['SPI', d.evm.SPI === null ? 'N/A' : d.evm.SPI], ['健康度', d.health.overall]]);
+  });
+  $('#snapBtn') && $('#snapBtn').addEventListener('click', async () => {
+    if (!await confirmDialog('產生本週快照', '快照建立後不可覆寫，確定以目前資料建立本週（週五）快照？', '建立快照')) return;
+    try { const s = await api('createWeeklySnapshot', S.projectId); toast('已建立快照 ' + s.week_ending, 'ok'); loadDashboard(); }
+    catch (e) { toast(errMsg(e), 'err'); }
+  });
+}
+
+/* ------------------------------ Charts ------------------------------ */
+function chartDefaults() {
+  if (typeof Chart === 'undefined') return false;
+  Chart.defaults.font.family = cssVar('--font') || 'sans-serif';
+  Chart.defaults.font.size = 12;
+  Chart.defaults.color = cssVar('--chart-axis');
+  Chart.defaults.plugins.legend.display = false;
+  Chart.defaults.maintainAspectRatio = false;
+  Chart.defaults.plugins.tooltip.backgroundColor = '#0F172A';
+  Chart.defaults.plugins.tooltip.padding = 10;
+  Chart.defaults.plugins.tooltip.cornerRadius = 8;
+  return true;
+}
+const grid = () => ({ color: cssVar('--chart-grid'), drawTicks: false });
+const statusLine = idx => ({
+  id: 'statusLine',
+  afterDatasetsDraw(chart) {
+    if (idx < 0) return;
+    const x = chart.scales.x.getPixelForValue(idx), { top, bottom } = chart.chartArea, c = chart.ctx;
+    c.save(); c.strokeStyle = cssVar('--text'); c.lineWidth = 1.5; c.setLineDash([3, 3]);
+    c.beginPath(); c.moveTo(x, top); c.lineTo(x, bottom); c.stroke();
+    c.setLineDash([]); c.fillStyle = cssVar('--text'); c.font = '600 11px ' + (cssVar('--font') || 'sans-serif');
+    c.fillText('狀態日', Math.min(x + 4, chart.chartArea.right - 40), top + 12); c.restore();
+  }
+});
+function addChart(id, cfg) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  S.charts.push(new Chart(el, cfg));
+}
+function drawDashboardCharts(d) {
+  if (!chartDefaults()) { document.querySelectorAll('.chart-box').forEach(b => b.innerHTML = emptyState('圖表元件（Chart.js）無法載入，請檢查網路。')); return; }
+  const sc = d.sCurve, C = i => cssVar('--s' + i), base = cssVar('--chart-baseline');
+  const pctAxis = { min: 0, max: 100, grid: grid(), border: { display: false }, ticks: { callback: v => v + '%', stepSize: 25 } };
+  const idx = sc.labels.indexOf(d.statusDate);
+  addChart('cS', {
+    type: 'line',
+    data: { labels: sc.labels, datasets: [
+      { label: 'Baseline 計畫', data: sc.baseline, borderColor: base, borderWidth: 2, pointRadius: 0, stepped: true },
+      { label: 'Actual 實際', data: sc.hasActual ? sc.actual : [], borderColor: C(1), borderWidth: 2.5, pointRadius: 0, stepped: true, spanGaps: false },
+      { label: 'Forecast 預測', data: sc.forecast, borderColor: C(2), borderWidth: 2, borderDash: [6, 4], pointRadius: 0, stepped: true }
+    ]},
+    options: {
+      interaction: { mode: 'index', intersect: false },
+      scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 8, callback: function (v) { return md(this.getLabelForValue(v)); } } }, y: pctAxis },
+      plugins: { tooltip: { callbacks: {
+        label: c => c.raw === null || c.raw === undefined ? null : `${c.dataset.label}：${fmtPct(c.raw)}`,
+        footer: items => { const b = items.find(i => i.datasetIndex === 0), a = items.find(i => i.datasetIndex === 1 && i.raw !== null && i.raw !== undefined);
+          return a && b ? '差異：' + (a.raw - b.raw > 0 ? '+' : '') + fmtNum(a.raw - b.raw) + ' pt' : ''; } } } }
+    },
+    plugins: [statusLine(idx)]
+  });
+  if (d.wbsTrend.length) {
+    const keys = ['completed', 'inProgress', 'notStarted', 'delayed', 'blocked'], names = ['已完成', '進行中', '未開始', '延遲', '受阻'];
+    addChart('cW', { type: 'line', data: { labels: d.wbsTrend.map(x => md(x.week)), datasets: keys.map((k, i) => ({ label: names[i], data: d.wbsTrend.map(x => x[k]), borderColor: C(i + 1), borderWidth: 2, pointRadius: 4, pointBackgroundColor: C(i + 1) })) },
+      options: { interaction: { mode: 'index', intersect: false }, scales: { x: { grid: { display: false } }, y: { beginAtZero: true, grid: grid(), border: { display: false }, ticks: { precision: 0 } } } } });
+  }
+  const bd = d.cost.breakdown;
+  addChart('cDonut', { type: 'doughnut', data: { labels: bd.map(b => b.category), datasets: [{ data: bd.map(b => b.baseline), backgroundColor: bd.map((b, i) => C((i % 8) + 1)), borderColor: cssVar('--card'), borderWidth: 2 }] },
+    options: { cutout: '68%', plugins: { tooltip: { callbacks: { label: c => `${c.label}：${fmtMoney(c.raw)}（${fmtPct(c.raw / d.cost.costBaseline * 100)}）` } } } } });
+  addChart('cBar', { type: 'bar', data: { labels: bd.map(b => b.category), datasets: [
+      { label: '基準預算', data: bd.map(b => b.baseline), backgroundColor: base, borderRadius: 4, borderSkipped: 'start', maxBarThickness: 18 },
+      { label: '已承諾', data: bd.map(b => b.committed), backgroundColor: C(2), borderRadius: 4, borderSkipped: 'start', maxBarThickness: 18 },
+      { label: '實際支出', data: bd.map(b => b.actual), backgroundColor: C(1), borderRadius: 4, borderSkipped: 'start', maxBarThickness: 18 }] },
+    options: { interaction: { mode: 'index', intersect: false }, scales: { x: { grid: { display: false } }, y: { beginAtZero: true, grid: grid(), border: { display: false }, ticks: { callback: v => (v / 1000) + 'k' } } },
+      plugins: { tooltip: { callbacks: { label: c => `${c.dataset.label}：${fmtMoney(c.raw)}` } } } } });
+  if (d.cost.trend.length) {
+    addChart('cCT', { type: 'line', data: { labels: d.cost.trend.map(x => md(x.week)), datasets: [
+      { label: 'PV', data: d.cost.trend.map(x => x.pv), borderColor: base, borderWidth: 2, pointRadius: 4 },
+      { label: 'EV', data: d.cost.trend.map(x => x.ev), borderColor: C(1), borderWidth: 2, pointRadius: 4 },
+      { label: 'AC', data: d.cost.trend.map(x => x.ac), borderColor: C(2), borderWidth: 2, pointRadius: 4 }] },
+      options: { interaction: { mode: 'index', intersect: false }, scales: { x: { grid: { display: false } }, y: { beginAtZero: true, grid: grid(), ticks: { callback: v => (v / 1000) + 'k' } } },
+        plugins: { tooltip: { callbacks: { label: c => `${c.dataset.label}：${fmtMoney(c.raw)}` } } } } });
+  }
+  const st = Object.keys(d.issues.byStatus);
+  addChart('cIs', { type: 'bar', data: { labels: st, datasets: [{ label: '問題數', data: st.map(s => d.issues.byStatus[s]), backgroundColor: C(1), borderRadius: 4, borderSkipped: 'start', maxBarThickness: 28 }] },
+    options: { indexAxis: 'y', scales: { x: { beginAtZero: true, grid: grid(), ticks: { precision: 0 } }, y: { grid: { display: false } } },
+      onClick: (e, els) => { if (els.length) { const s = st[els[0].index]; go('issues', { fn: r => r.status === s, label: '狀態：' + s }); } },
+      onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; } } });
+  const ag = Object.keys(d.issues.aging);
+  addChart('cAge', { type: 'bar', data: { labels: ag, datasets: [{ label: '未結問題', data: ag.map(a => d.issues.aging[a]), backgroundColor: C(1), borderRadius: 4, borderSkipped: 'start', maxBarThickness: 32 }] },
+    options: { scales: { x: { grid: { display: false } }, y: { beginAtZero: true, grid: grid(), ticks: { precision: 0 } } } } });
+}
+
+/* ------------------------------ Mobile Dashboard ------------------------------ */
+function renderMobile(d) {
+  const k = d.kpis;
+  $('#view').innerHTML = `<div style="max-width:520px;margin:0 auto">
+    <div class="card" style="margin-bottom:12px"><div class="health"><div class="health-ring ${d.health.overall}">${fmtPct(k.completionPct)}</div>
+      <div><b>${esc(d.project.project_name)}</b><div style="font-size:12px;color:var(--muted)">健康度 ${esc(d.health.overall)}｜狀態日 ${esc(d.statusDate)}</div>
+      <div style="font-size:12px;color:var(--muted)">計畫 ${fmtPct(d.sCurve.plannedAtStatus)}｜已交付 ${d.sCurve.hasActual ? fmtPct(d.sCurve.actualAtStatus) : '尚無實績'}</div></div></div></div>
+    <div class="kpis" style="grid-template-columns:repeat(2,1fr)">
+      ${kpiCard('逾期工作', k.overdueTasks, '項', 'alert', 'overdue', k.overdueTasks ? 'danger' : '')}
+      ${kpiCard('高風險', k.highRisks, '項', 'shield', 'risks')}
+      ${kpiCard('未結問題', k.openIssues, '件', 'alert', 'issues')}
+      ${kpiCard('預算使用率', fmtPct(k.budgetUtilizationPct), fmtMoney(k.actualCost), 'coin', 'costs')}
+    </div>
+    <div class="card" style="margin-bottom:12px"><div class="card-h"><h2>近期里程碑</h2></div>${d.upcomingMilestones.length ? `<div class="list">${d.upcomingMilestones.map(m => `<div class="li"><div class="grow"><div class="t">${esc(m.milestone_name)}</div><div class="s">${esc(m.forecast_date || m.baseline_date)}｜剩 ${m.days_to_go} 天</div></div>${pill(m.health)}</div>`).join('')}</div>` : emptyState('14 天內沒有里程碑')}</div>
+    <div class="card" style="margin-bottom:12px"><div class="card-h"><h2>待辦與提醒</h2></div>${d.reminders.length ? `<div class="list">${d.reminders.map(r => `<button class="li li-btn" data-open="${esc(r.ref.table)}|${esc(r.ref.id)}"><div class="grow"><div class="t">${esc(r.title)}</div><div class="s">${esc(r.kind)}｜${esc(r.date)}</div></div></button>`).join('')}</div>` : emptyState('沒有待辦提醒', 'check')}</div>
+    <div class="card"><div class="card-h"><h2>主要風險</h2></div>${d.risks.top.length ? `<div class="list">${d.risks.top.map(r => `<button class="li li-btn" data-open="Risks|${esc(r.id)}"><div class="grow"><div class="t">${esc(r.desc)}</div><div class="s">${esc(r.owner)}</div></div><span class="pill ${tone(r.severity)}">${r.score}</span></button>`).join('')}</div>` : emptyState('沒有未關閉風險')}</div>
+  </div>`;
+  bindDashboard(d);
+}
+
+/* ------------------------------ Table pages ------------------------------ */
+async function loadTable(table, force) {
+  if (S.cache[table] && !force) return S.cache[table];
+  const rows = await api('listRecords', table, table === 'AuditLogs' ? null : S.projectId, table === 'AuditLogs' ? { limit: 500 } : {});
+  S.cache[table] = rows || [];
+  return S.cache[table];
+}
+function tableState(key, table) {
+  if (!S.table[key]) {
+    const sch = S.boot.schema[table];
+    const visible = DEFAULT_COLS[table] || sch.fields.filter(f => !f.system).slice(0, 8).map(f => f.name);
+    S.table[key] = { q: '', sort: table === 'WBS' ? 'wbs_code' : null, dir: 1, page: 1, size: 20, visible, enumFilter: '', collapsed: {} };
+  }
+  return S.table[key];
+}
+async function renderTablePage(item) {
+  const view = $('#view'), table = item.table, sch = S.boot.schema[table];
+  view.innerHTML = `<div class="card"><div class="skeleton" style="height:36px;margin-bottom:12px"></div><div class="skeleton" style="height:320px"></div></div>`;
+  let rows;
+  try { rows = await loadTable(table, true); }
+  catch (e) { view.innerHTML = errorState(e, true); view.querySelector('[data-act="retry"]').addEventListener('click', () => renderTablePage(item)); return; }
+  if (S.page !== item.key) return;
+  const st = tableState(item.key, table);
+  const perm = S.boot.permissions[table] || {};
+  const enumField = sch.fields.find(f => f.type === 'enum' && /status|result|severity|responsibility/.test(f.name));
+  const phaseNote = item.phase ? `<div class="notice">完整的「${esc(item.label)}」視圖（${item.key === 'gantt' ? '甘特圖' : item.key === 'raci' ? '矩陣檢視與 A/R 缺漏檢查' : '活動當日即時時序表'}）規劃於第 ${item.phase} 階段交付；目前提供可讀寫的資料表檢視。</div>` : '';
+  view.innerHTML = `${phaseNote}
+  ${S.pendingFilter ? `<div class="notice">已套用篩選：${esc(S.pendingFilter.label || '')} <button class="btn sm" id="clearPF" style="margin-left:8px">清除</button></div>` : ''}
+  <div class="card">
+    <div class="card-h"><h2>${esc(sch.label)}</h2><span class="sub">${esc(sch.code)}｜工作表 ${esc(table)}</span><span class="spacer"></span>
+      ${table === 'WBS' && S.boot.permissions._baseline ? '<button class="btn sm" id="baselineBtn">核准基準</button>' : ''}</div>
+    <div class="table-tools">
+      <div class="field" style="flex:1;min-width:180px"><label for="tq" class="sr-only">搜尋</label><input id="tq" class="input" type="search" placeholder="搜尋此表…" value="${esc(st.q)}"></div>
+      ${enumField ? `<div class="field"><label for="tf" class="sr-only">${esc(enumField.label)}</label><select id="tf" class="input"><option value="">全部${esc(enumField.label)}</option>${S.boot.enums[enumField.enumKey].map(v => `<option ${st.enumFilter === v ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select></div>` : ''}
+      <div style="position:relative"><button class="btn" id="colBtn" aria-haspopup="true">${svg('cols', 16)}欄位</button></div>
+      <button class="btn" id="csvBtn">${svg('download', 16)}CSV</button>
+      <button class="btn" id="reloadBtn" aria-label="重新整理">${svg('refresh', 16)}</button>
+      ${perm.write && !sch.immutable && table !== 'AuditLogs' ? `<button class="btn primary" id="addBtn">${svg('plus', 16)}新增</button>` : ''}
+    </div>
+    <div id="tbody"></div>
+  </div>`;
+  const draw = () => drawTable(item, rows, enumField);
+  $('#tq').addEventListener('input', debounce(e => { st.q = e.target.value; st.page = 1; draw(); }, 200));
+  $('#tf') && $('#tf').addEventListener('change', e => { st.enumFilter = e.target.value; st.page = 1; draw(); });
+  $('#reloadBtn').addEventListener('click', () => renderTablePage(item));
+  $('#addBtn') && $('#addBtn').addEventListener('click', () => openForm(table, null, () => renderTablePage(item), item.preset));
+  $('#clearPF') && $('#clearPF').addEventListener('click', () => { S.pendingFilter = null; renderTablePage(item); });
+  $('#csvBtn').addEventListener('click', () => {
+    const data = filtered(item, rows, enumField), cols = st.visible;
+    downloadCsv(table + '_' + todayStr() + '.csv', [cols.map(c => (S.boot.schema[table].fields.find(f => f.name === c) || {}).label || c)].concat(data.map(r => cols.map(c => r[c]))));
+  });
+  $('#colBtn').addEventListener('click', e => columnMenu(e.currentTarget, item, draw));
+  $('#baselineBtn') && $('#baselineBtn').addEventListener('click', approveBaselineFlow);
+  draw();
+}
+function filtered(item, rows, enumField) {
+  const st = S.table[item.key], q = st.q.trim().toLowerCase();
+  let out = rows.slice();
+  if (item.preset) out = out.filter(r => Object.keys(item.preset).every(k => String(r[k]) === String(item.preset[k])));
+  if (S.pendingFilter) {
+    if (S.pendingFilter.ids) out = out.filter(r => S.pendingFilter.ids.includes(r[S.boot.schema[item.table].key]));
+    if (S.pendingFilter.fn) out = out.filter(S.pendingFilter.fn);
+  }
+  if (enumField && st.enumFilter) out = out.filter(r => r[enumField.name] === st.enumFilter || r.effective_status === st.enumFilter);
+  if (q) out = out.filter(r => Object.keys(r).some(k => String(r[k]).toLowerCase().includes(q) || (RES_FIELDS.includes(k) && resName(r[k]).toLowerCase().includes(q))));
+  if (st.sort) {
+    const natural = (a, b) => String(a).localeCompare(String(b), 'zh-Hant', { numeric: true });
+    out.sort((a, b) => { const x = a[st.sort], y = b[st.sort];
+      if (typeof x === 'number' && typeof y === 'number') return (x - y) * st.dir;
+      return natural(x === undefined ? '' : x, y === undefined ? '' : y) * st.dir; });
+  }
+  // WBS 樹狀收合：無搜尋／篩選時套用
+  if (item.table === 'WBS' && !item.preset && !q && !S.pendingFilter && !st.enumFilter && st.sort === 'wbs_code') {
+    const hidden = id => { let r = rows.find(x => x.wbs_id === id); let g = 0;
+      while (r && r.parent_wbs_id && g++ < 10) { if (st.collapsed[r.parent_wbs_id]) return true; r = rows.find(x => x.wbs_id === r.parent_wbs_id); } return false; };
+    out = out.filter(r => !hidden(r.wbs_id));
+  }
+  return out;
+}
+function cellHtml(table, f, r, canWrite) {
+  const v = r[f.name];
+  if (!f) return '';
+  if (canWrite && f.type === 'enum' && !f.system && !(DERIVED[table] || []).includes(f.name) && S.boot.schema[table].key !== f.name) {
+    return `<label class="sr-only" for="ie-${esc(r[S.boot.schema[table].key])}-${f.name}">${esc(f.label)}</label><select class="inline" id="ie-${esc(r[S.boot.schema[table].key])}-${f.name}" data-inline="${f.name}" data-id="${esc(r[S.boot.schema[table].key])}">${S.boot.enums[f.enumKey].map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+  }
+  if (table === 'WBS' && f.name === 'status' && r.effective_status && r.effective_status !== v) return pill(r.effective_status) + ` <span style="font-size:11px;color:var(--muted)">（表內：${esc(v)}）</span>`;
+  if (f.type === 'enum') return pill(v);
+  if (f.type === 'money') return v === '' ? '' : fmtMoney(v);
+  if (f.type === 'pct') return v === '' ? '' : fmtPct(table === 'WBS' && f.name === 'percent_complete' && !r.is_leaf ? r.rollup_percent : v);
+  if (f.type === 'bool') return v ? '是' : '否';
+  if (f.type === 'url') return v ? `<a href="${esc(v)}" target="_blank" rel="noopener noreferrer">開啟</a>` : '';
+  if (RES_FIELDS.includes(f.name) && !(table === 'Resources' && f.name === 'resource_id')) return esc(resName(v));
+  if (f.type === 'refs') return esc(String(v).split(',').join(', '));
+  return `<span class="clip">${esc(v)}</span>`;
+}
+function drawTable(item, rows, enumField) {
+  const table = item.table, st = S.table[item.key], sch = S.boot.schema[table];
+  const perm = S.boot.permissions[table] || {};
+  const canWrite = perm.write && !sch.immutable && table !== 'AuditLogs';
+  const data = filtered(item, rows, enumField);
+  const pages = Math.max(1, Math.ceil(data.length / st.size));
+  st.page = Math.min(st.page, pages);
+  const slice = data.slice((st.page - 1) * st.size, st.page * st.size);
+  const fields = st.visible.map(n => sch.fields.find(f => f.name === n)).filter(Boolean);
+  const key = sch.key;
+  const box = $('#tbody');
+  if (!data.length) { box.innerHTML = emptyState(rows.length ? '沒有符合條件的資料' : '此表尚無資料'); return; }
+  const isTree = table === 'WBS' && st.sort === 'wbs_code' && !item.preset;
+  box.innerHTML = `<div class="table-wrap"><table class="data"><caption class="sr-only">${esc(sch.label)}</caption><thead><tr>
+    ${fields.map(f => `<th scope="col" aria-sort="${st.sort === f.name ? (st.dir > 0 ? 'ascending' : 'descending') : 'none'}"><button data-sort="${f.name}">${esc(f.label)}${st.sort === f.name ? (st.dir > 0 ? ' ▲' : ' ▼') : ''}</button></th>`).join('')}
+    <th scope="col"><span class="sr-only">操作</span></th></tr></thead><tbody>
+    ${slice.map(r => `<tr>${fields.map((f, i) => {
+      let inner = cellHtml(table, f, r, canWrite);
+      if (isTree && i === 0) {
+        const lv = Number(r.level) || 1;
+        const tog = r.child_count ? `<button class="btn sm" style="height:24px;padding:0 4px;border:0" data-tog="${esc(r.wbs_id)}" aria-expanded="${!st.collapsed[r.wbs_id]}" aria-label="${st.collapsed[r.wbs_id] ? '展開' : '收合'} ${esc(r.wbs_code)}">${svg(st.collapsed[r.wbs_id] ? 'chev' : 'chevd', 14)}</button>` : '<span style="display:inline-block;width:24px"></span>';
+        inner = `<span class="tree-indent" style="width:${(lv - 1) * 18}px"></span>${tog}<b>${esc(r.wbs_code)}</b>`;
+      }
+      return `<td class="${['money', 'num', 'int', 'pct'].includes(f.type) ? 'num' : ''}">${inner}</td>`;
+    }).join('')}<td><button class="btn sm" data-edit="${esc(r[key])}">${canWrite ? '編輯' : '檢視'}</button></td></tr>`).join('')}
+    </tbody></table></div>
+    <div class="cards-view">${slice.map(r => `<button class="rcard" data-edit="${esc(r[key])}">${fields.slice(0, 6).map(f => `<div class="kv"><span>${esc(f.label)}</span><span>${f.type === 'enum' ? pill(r[f.name]) : cellHtml(table, f, r, false)}</span></div>`).join('')}</button>`).join('')}</div>
+    <div class="pager"><span>共 ${data.length} 筆｜第 ${st.page} / ${pages} 頁</span>
+      <button class="btn sm" data-pg="-1" ${st.page <= 1 ? 'disabled' : ''}>上一頁</button><button class="btn sm" data-pg="1" ${st.page >= pages ? 'disabled' : ''}>下一頁</button></div>`;
+  box.querySelectorAll('[data-sort]').forEach(b => b.addEventListener('click', () => { const s = b.dataset.sort; st.dir = st.sort === s ? -st.dir : 1; st.sort = s; drawTable(item, rows, enumField); }));
+  box.querySelectorAll('[data-pg]').forEach(b => b.addEventListener('click', () => { st.page += Number(b.dataset.pg); drawTable(item, rows, enumField); }));
+  box.querySelectorAll('[data-tog]').forEach(b => b.addEventListener('click', () => { st.collapsed[b.dataset.tog] = !st.collapsed[b.dataset.tog]; drawTable(item, rows, enumField); }));
+  box.querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () => { const r = rows.find(x => String(x[key]) === b.dataset.edit); openForm(table, r, () => renderTablePage(item)); }));
+  box.querySelectorAll('[data-inline]').forEach(sel => sel.addEventListener('change', async () => {
+    const r = rows.find(x => String(x[key]) === sel.dataset.id), field = sel.dataset.inline, prev = r[field];
+    sel.disabled = true;
+    try {
+      const saved = await api('updateRecord', table, r[key], { [field]: sel.value, row_version: r.row_version });
+      Object.assign(r, saved); toast('已更新「' + (sch.fields.find(f => f.name === field) || {}).label + '」', 'ok'); S.dash = null;
+      if (saved[field] !== sel.value) drawTable(item, rows, enumField);
+    } catch (e) { sel.value = prev; toast(errMsg(e), 'err'); }
+    sel.disabled = false;
+  }));
+}
+function columnMenu(btn, item, draw) {
+  const old = document.querySelector('.col-menu'); if (old) { old.remove(); return; }
+  const st = S.table[item.key], sch = S.boot.schema[item.table];
+  const m = document.createElement('div'); m.className = 'col-menu'; m.setAttribute('role', 'menu');
+  m.innerHTML = sch.fields.filter(f => f.name !== 'is_deleted').map(f => `<label><input type="checkbox" value="${f.name}" ${st.visible.includes(f.name) ? 'checked' : ''}>${esc(f.label)}</label>`).join('');
+  btn.parentElement.appendChild(m);
+  m.addEventListener('change', e => { const n = e.target.value; st.visible = e.target.checked ? sch.fields.map(f => f.name).filter(x => st.visible.includes(x) || x === n) : st.visible.filter(x => x !== n); draw(); });
+  setTimeout(() => document.addEventListener('click', function h(ev) { if (!m.contains(ev.target) && ev.target !== btn) { m.remove(); document.removeEventListener('click', h); } }), 0);
+}
+
+/* ------------------------------ Forms ------------------------------ */
+async function openRecord(table, id) {
+  try { const rows = await loadTable(table, true); const r = rows.find(x => String(x[S.boot.schema[table].key]) === String(id)); if (r) openForm(table, r, () => S.page === 'dashboard' ? loadDashboard() : go(S.page)); else toast('找不到資料', 'err'); }
+  catch (e) { toast(errMsg(e), 'err'); }
+}
+function inputFor(table, f, val, ro) {
+  const id = 'f_' + f.name, dis = ro ? 'disabled' : '', req = f.required ? 'required aria-required="true"' : '';
+  const v = val === undefined || val === null ? '' : val;
+  if (f.type === 'enum') return `<select id="${id}" name="${f.name}" class="input" ${dis} ${req}><option value="">—</option>${S.boot.enums[f.enumKey].map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+  if (RES_FIELDS.includes(f.name) && S.boot.resources.length && !(table === 'Resources')) return `<select id="${id}" name="${f.name}" class="input" ${dis} ${req}><option value="">—</option>${S.boot.resources.map(r => `<option value="${esc(r.id)}" ${r.id === v ? 'selected' : ''}>${esc(r.id + '｜' + r.name)}</option>`).join('')}${v && !S.boot.resources.some(r => r.id === v) ? `<option selected value="${esc(v)}">${esc(v)}</option>` : ''}</select>`;
+  if (f.type === 'text' || f.type === 'json') return `<textarea id="${id}" name="${f.name}" class="input" ${dis} ${req} maxlength="5000">${esc(v)}</textarea>`;
+  if (f.type === 'bool') return `<select id="${id}" name="${f.name}" class="input" ${dis}><option value="false" ${!v ? 'selected' : ''}>否</option><option value="true" ${v ? 'selected' : ''}>是</option></select>`;
+  const type = { date: 'date', int: 'number', num: 'number', money: 'number', pct: 'number', email: 'email', url: 'url', time: 'time' }[f.type] || 'text';
+  const extra = f.type === 'pct' ? 'min="0" max="100" step="0.1"' : f.type === 'money' ? 'min="0" step="1"' : f.type === 'int' ? 'step="1"' : f.type === 'num' ? 'step="any"' : '';
+  const ph = f.type === 'datetime' ? 'placeholder="YYYY-MM-DD HH:mm"' : f.type === 'refs' ? 'placeholder="以逗號分隔 ID"' : (f.type === 'id' ? 'placeholder="留空自動產生"' : '');
+  return `<input id="${id}" name="${f.name}" class="input" type="${type}" ${extra} ${ph} ${dis} ${f.type === 'id' ? '' : req} value="${esc(v)}" maxlength="${f.type === 'text' ? 5000 : 300}">`;
+}
+function openForm(table, rec, onSaved, preset) {
+  const sch = S.boot.schema[table], perm = S.boot.permissions[table] || {};
+  const canWrite = perm.write && !sch.immutable && table !== 'AuditLogs';
+  const isNew = !rec;
+  const hidden = (DERIVED[table] || []).concat(DERIVED._all).concat(['project_id']);
+  const fields = sch.fields.filter(f => !f.system && (isNew ? !hidden.includes(f.name) : true));
+  const init = rec || Object.assign({}, preset || {}, table === 'Issues' ? { created_date: todayStr(), status: 'Open' } : {}, table === 'WBS' ? { status: 'Not Started', percent_complete: 0 } : {},
+    table === 'Risks' ? { status: 'Open' } : {}, table === 'Communications' ? { meeting_status: 'Scheduled' } : {}, table === 'Changes' ? { implementation_status: 'Draft', request_date: todayStr() } : {},
+    table === 'Acceptance' ? { result: 'Pending' } : {});
+  const ro = f => !canWrite || (!isNew && (f.name === sch.key || f.name === 'project_id')) || (!isNew && (hidden.includes(f.name) || f.type === 'json'));
+  const m = openModal(`<form id="recForm" novalidate>
+    <div class="modal-h"><h2 id="mTitle">${isNew ? '新增' : canWrite ? '編輯' : '檢視'}｜${esc(sch.label)}</h2><button type="button" class="icon-btn" data-close aria-label="關閉">${svg('x', 16)}</button></div>
+    <div class="modal-b">
+      <div class="full notice bad" id="formErr" hidden></div>
+      ${!isNew && rec.approved_at && table === 'WBS' ? `<div class="full notice warn">此工作已核准基準（${esc(rec.baseline_version)}），基準欄位需透過變更請求修改。</div>` : ''}
+      ${fields.map(f => `<div class="field ${f.type === 'text' || f.type === 'json' ? 'full' : ''}"><label for="f_${f.name}">${esc(f.label)} ${f.required && f.type !== 'id' ? '<span class="req" aria-hidden="true">*</span>' : ''}<span style="color:var(--muted);font-weight:400"> ${esc(f.name)}</span></label>
+        ${inputFor(table, f, init[f.name], ro(f))}<div class="err" id="e_${f.name}"></div></div>`).join('')}
+      ${!isNew ? `<div class="full" style="font-size:12px;color:var(--muted)">版本 ${esc(rec.row_version)}｜更新 ${esc(rec.updated_at || '')}</div>` : ''}
+    </div>
+    <div class="modal-f">
+      ${!isNew && canWrite && perm.del ? '<button type="button" class="btn danger left" id="delBtn">刪除</button>' : ''}
+      ${!isNew && table === 'Risks' && canWrite && !rec.linked_issue_id ? '<button type="button" class="btn left" id="toIssue">轉為問題</button>' : ''}
+      <button type="button" class="btn" data-close>${canWrite ? '取消' : '關閉'}</button>
+      ${canWrite ? '<button type="submit" class="btn primary" id="saveBtn">儲存</button>' : ''}
+    </div></form>`);
+  const form = m.el.querySelector('#recForm');
+  const showErr = msg => { const e = form.querySelector('#formErr'); e.hidden = false; e.textContent = msg; e.scrollIntoView({ block: 'nearest' }); };
+  form.addEventListener('submit', async ev => {
+    ev.preventDefault();
+    form.querySelectorAll('.err').forEach(e => e.textContent = ''); form.querySelectorAll('[aria-invalid]').forEach(e => e.removeAttribute('aria-invalid'));
+    const payload = {}; let bad = false;
+    fields.forEach(f => {
+      const el = form.elements[f.name]; if (!el || el.disabled) return;
+      let v = el.value.trim();
+      if (f.type === 'bool') v = v === 'true';
+      if (f.required && f.type !== 'id' && v === '') { bad = true; el.setAttribute('aria-invalid', 'true'); form.querySelector('#e_' + f.name).textContent = '必填'; }
+      if (['int', 'num', 'money', 'pct'].includes(f.type) && v !== '' && !isFinite(Number(v))) { bad = true; el.setAttribute('aria-invalid', 'true'); form.querySelector('#e_' + f.name).textContent = '需為數字'; }
+      if (f.type === 'pct' && v !== '' && (Number(v) < 0 || Number(v) > 100)) { bad = true; el.setAttribute('aria-invalid', 'true'); form.querySelector('#e_' + f.name).textContent = '0–100'; }
+      if ((f.name === 'probability' || f.name === 'impact') && v !== '' && !/^[1-5]$/.test(v)) { bad = true; el.setAttribute('aria-invalid', 'true'); form.querySelector('#e_' + f.name).textContent = '1–5 整數'; }
+      if (isNew && f.type === 'id' && v === '') return;
+      payload[f.name] = v;
+    });
+    if (bad) { showErr('請修正標示的欄位'); return; }
+    const btn = form.querySelector('#saveBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>儲存中…';
+    try {
+      if (isNew) await api('createRecord', table, Object.assign({ project_id: S.projectId }, payload));
+      else await api('updateRecord', table, rec[sch.key], Object.assign(payload, { row_version: rec.row_version }));
+      toast('已儲存至 Google Sheets', 'ok'); S.dash = null; delete S.cache[table]; m.close(); onSaved && onSaved();
+    } catch (e) { showErr(errMsg(e)); btn.disabled = false; btn.textContent = '儲存'; } // 失敗保留輸入
+  });
+  const del = form.querySelector('#delBtn');
+  del && del.addEventListener('click', async () => {
+    if (!await confirmDialog('確認刪除', '此筆資料將標記為已刪除（Soft Delete），可由管理員復原。確定刪除？', '刪除')) return;
+    try { await api('deleteRecord', table, rec[sch.key], rec.row_version); toast('已刪除', 'ok'); S.dash = null; m.close(); onSaved && onSaved(); }
+    catch (e) { toast(errMsg(e), 'err'); }
+  });
+  const ti = form.querySelector('#toIssue');
+  ti && ti.addEventListener('click', async () => {
+    try { const is = await api('convertRiskToIssue', rec.risk_id); toast('已建立問題 ' + is.issue_id + '，並保留風險關聯', 'ok'); S.dash = null; m.close(); onSaved && onSaved(); }
+    catch (e) { toast(errMsg(e), 'err'); }
+  });
+}
+async function approveBaselineFlow() {
+  const m = openModal(`<div class="modal-h"><h2 id="mTitle">核准 WBS 基準</h2></div><div class="modal-b" style="display:block">
+    <p style="margin-top:0">核准後，計畫日期、權重、交付成果與驗收標準將鎖定，只能透過核准的變更請求修改。</p>
+    <div class="field"><label for="bv">基準版本（如 v1、v1.1）</label><input id="bv" class="input" value="v1"></div></div>
+    <div class="modal-f"><button class="btn" data-close>取消</button><button class="btn primary" id="bOk">核准</button></div>`, { size: 'sm' });
+  m.el.querySelector('#bOk').addEventListener('click', async () => {
+    try { const r = await api('approveBaseline', S.projectId, m.el.querySelector('#bv').value.trim()); toast(`已核准基準 ${r.version}（${r.count} 項）`, 'ok'); m.close(); S.dash = null; go('wbs'); }
+    catch (e) { toast(errMsg(e), 'err'); }
+  });
+}
+
+/* ------------------------------ CSV ------------------------------ */
+function downloadCsv(name, rows) {
+  const cell = v => { let s = v === null || v === undefined ? '' : String(v); if (/^[=+\-@]/.test(s)) s = "'" + s; return '"' + s.replace(/"/g, '""') + '"'; };
+  const blob = new Blob(['﻿' + rows.map(r => r.map(cell).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+
+/* ------------------------------ Global search & notifications ------------------------------ */
+async function globalSearch(q) {
+  q = q.trim().toLowerCase(); if (!q) return;
+  const tables = ['WBS', 'Issues', 'Risks', 'Milestones'].filter(t => S.boot.permissions[t] && S.boot.permissions[t].read);
+  try {
+    const results = [];
+    for (const t of tables) {
+      const rows = await loadTable(t);
+      rows.filter(r => Object.values(r).some(v => String(v).toLowerCase().includes(q))).slice(0, 8).forEach(r => results.push({ t, r }));
+    }
+    const label = r => r.task_name || r.title || r.risk_description || r.milestone_name;
+    const m = openModal(`<div class="modal-h"><h2 id="mTitle">搜尋「${esc(q)}」</h2><button class="icon-btn" data-close aria-label="關閉">${svg('x', 16)}</button></div>
+      <div class="modal-b" style="display:block">${results.length ? `<div class="list">${results.map(x => `<button class="li li-btn" data-o="${esc(x.t)}|${esc(x.r[S.boot.schema[x.t].key])}"><div class="grow"><div class="t">${esc(label(x.r))}</div><div class="s">${esc(S.boot.schema[x.t].label)}｜${esc(x.r[S.boot.schema[x.t].key])}</div></div></button>`).join('')}</div>` : emptyState('找不到符合的資料')}</div>`);
+    m.el.querySelectorAll('[data-o]').forEach(b => b.addEventListener('click', () => { const [t, id] = b.dataset.o.split('|'); m.close(); openRecord(t, id); }));
+  } catch (e) { toast(errMsg(e), 'err'); }
+}
+function showNotifications() {
+  const r = (S.dash && S.dash.reminders) || [];
+  openModal(`<div class="modal-h"><h2 id="mTitle">通知</h2><button class="icon-btn" data-close aria-label="關閉">${svg('x', 16)}</button></div>
+    <div class="modal-b" style="display:block">${r.length ? `<div class="list">${r.map(x => `<div class="li"><div class="grow"><div class="t">${esc(x.title)}</div><div class="s">${esc(x.kind)}｜${esc(x.date)}｜${esc(x.owner)}</div></div></div>`).join('')}</div>` : emptyState('沒有新通知', 'check')}</div>`, { size: 'sm' });
+}
+
+/* ------------------------------ Init ------------------------------ */
+function bindShell() {
+  $('#nav').addEventListener('click', e => { const b = e.target.closest('[data-page]'); if (b) go(b.dataset.page); });
+  $('#menuToggle').addEventListener('click', () => { const sb = $('#sidebar'); const open = !sb.classList.contains('open'); sb.classList.toggle('open', open); $('#backdrop').classList.toggle('show', open); $('#menuToggle').setAttribute('aria-expanded', String(open)); });
+  $('#backdrop').addEventListener('click', closeDrawer);
+  $('#collapseBtn').addEventListener('click', () => $('#sidebar').classList.toggle('collapsed'));
+  $('#themeBtn').addEventListener('click', () => { S.theme = S.theme === 'dark' ? 'light' : 'dark'; document.documentElement.setAttribute('data-theme', S.theme); if (S.page === 'dashboard' && S.dash) { S.charts.forEach(c => c.destroy()); S.charts = []; renderDashboard(S.dash); } });
+  $('#notifBtn').addEventListener('click', showNotifications);
+  $('#globalSearch').addEventListener('keydown', e => { if (e.key === 'Enter') globalSearch(e.target.value); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
+}
+async function init() {
+  bindShell();
+  renderNav();
+  $('#view').innerHTML = skeleton();
+  try {
+    S.boot = await api('getBootstrap');
+    S.projectId = S.boot.defaultProjectId;
+    if (!S.boot.projects.some(p => p.id === S.projectId) && S.boot.projects.length) S.projectId = S.boot.projects[0].id;
+    const u = S.boot.user;
+    $('#userChip').innerHTML = `<div class="avatar" aria-hidden="true">${esc((u.name || u.email).substring(0, 1).toUpperCase())}</div><div class="who"><span>${esc(u.name || u.email)}</span><small>${esc(u.role)}</small></div>`;
+    if (!S.boot.projects.length) { $('#view').innerHTML = errorState({ code: 'NO_PROJECT', message: 'Projects 工作表沒有任何專案，請先執行 setupDatabase()。' }); return; }
+    go('dashboard');
+  } catch (e) {
+    $('#view').innerHTML = errorState(e, true);
+    const r = $('#view [data-act="retry"]'); r && r.addEventListener('click', () => location.reload());
+  }
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();
+</script>
